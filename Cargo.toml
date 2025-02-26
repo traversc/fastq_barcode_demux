@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 flate2 = "1.0.35" # latest Feb 3 2025
-bio = "0.28.2" # latest Feb 6 2025
+bio = "2.0.3" # latest Feb 25 2025
 clap = { version = "4.5.28", features = ["derive"] }
 rayon = "1.10.0"
 zstd = "0.13.2"

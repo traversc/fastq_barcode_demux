@@ -229,8 +229,6 @@ fn integration_test_generate_and_demux() {
             for (hdr1, hdr2) in r1_headers.iter().zip(r2_headers.iter()) {
                 let hdr1_parts: Vec<&str> = hdr1.split_whitespace().collect();
                 let hdr2_parts: Vec<&str> = hdr2.split_whitespace().collect();
-                assert_eq!(hdr1_parts.len(), 2, "R1 header does not have two parts");
-                assert_eq!(hdr2_parts.len(), 2, "R2 header does not have two parts");
                 // Check that the header (before the space) is identical for both files.
                 assert_eq!(hdr1_parts[0], hdr2_parts[0], "Header info mismatch between R1 and R2");
                 // Check that the read indicator (after the space) is different.

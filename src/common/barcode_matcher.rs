@@ -111,17 +111,20 @@ impl BarcodeMatcher {
     /// - If `read1_dirs[i]` is Rev or Both, read1 is matched against the reverse pattern.
     /// - Similarly for read2 with `read2_dirs[i]`.
     /// Matching is performed with bio::pattern_matching::myers::Myers. If MatchPos is
-    /// Start, the barcode is matched at the start of the read. Since Myers does not anchor
-    /// patterns, the match is considered valid if the edit distance plus the start position
+    /// End, the barcode is matched at the end of the read using find_all_end. Since Myers does not anchor
+    /// patterns, the match is considered valid if the edit distance plus the distance to the end position
     /// is less than or equal to the max_distance. This is valid as Myers outputs all possible 
-    /// alignments, so it is not favoring alignments that are farther away from the start. 
-    /// Similar logic if MatchPos is End. If MatchPos is Anywhere, the barcode can be
-    /// anywhere in the read.
-    /// Implementation details: for finding matches at the start of the read, we use reverse_complement 
-    /// of the read and then use find_all_end. This is because Myers::find_all requires 
-    /// mutability, in order to perform an internal traceback, therefore cannot be called from
-    /// a multithreaded context. Also Myers::find_all_end should be more efficient than 
-    /// Myers::find_all as it does not require traceback. 
+    /// end positions (as of 2.0.3), so it is not favoring alignments that are farther away from the end. 
+    /// 
+    /// As of 2.0.3, this is NOT true vice versa, e.g. Myers does not return all start positions because it does a traceback
+    /// to find the start position and does not iterate through all possible tracebacks. 
+    /// In order to match at the start of the read, we reverse complement the read and the barcode
+    /// and do find_all_end, since the end of the rev. comp. alignment is the start in the forward direction. 
+    /// 
+    /// Additionally, find_all requires mutability (for traceback) whereas find_all_end does not, so find_all_end is
+    /// more efficient and can be called from a multi-threaded context without cloning the pattern.
+    ///
+    /// Finally, if MatchPos is Anywhere, the barcode can be anywhere in the read and we check only the returned distance.
     pub fn find_unique_match(&self, read1: &str, read2: &str) -> UniqueMatch {
         let match_in_read = |read: &str,
                              fw_pat: &Myers<u64>,

@@ -6,9 +6,11 @@ use flate2::Compression;
 use std::io::{Write, BufReader, BufRead};
 
 const READ_LEN: usize = 80;
-const READS_PER_BARCODE: usize = 313;
-// 15 bp barcodes (at least 6 edit distance apart)
+const READS_PER_BARCODE: usize = 3141;
+
 const MAX_EDIT_DISTANCE: u32 = 2;
+// Barcodes and reverse complement are at least 6 bp apart in test_barcodes.txt
+// To-do: should be calculated dynamically
 const BARCODE_DISTANCE: u32 = 6;
 
 fn read_barcodes(path: &str) -> std::io::Result<Vec<String>> {
@@ -42,10 +44,14 @@ fn revcomp(seq: &str) -> String {
 // alignments may be less e.g. if a deletion cancels out an insertion
 fn validate_mut_barcode(barcode: &str, candidate: &str, edit_distance: u32, position: &str) -> bool {
     if position == "start" {
-        let mut pattern = Myers::<u64>::new(barcode.as_bytes());
-        let mut occ = pattern.find_all(candidate.as_bytes(), edit_distance as u8);
-        return ! occ.any(|(start, _, dist)| {
-            (dist as u32) + (start as u32) < edit_distance
+        // reverse complement candidate and barcode and do find_all_end
+        let barcode_rc = revcomp(barcode);
+        let candidate_rc = revcomp(candidate);
+        let pattern = Myers::<u64>::new(barcode_rc.as_bytes());
+        let mut occ = pattern.find_all_end(candidate_rc.as_bytes(), edit_distance as u8);
+        return ! occ.any(|(end, dist)| {
+            // end is position not end of range, so we need to add +1
+            (dist as u32) + ( ( candidate.len() - (end+1) ) as u32 ) < edit_distance
         });
     } else if position == "end" {
         let pattern = Myers::<u64>::new(barcode.as_bytes());
@@ -135,12 +141,12 @@ fn generate_fastq_read_pair(
         base_read
     };
     let header_r1 = format!(
-        "@{}_{}_{}_{}_{}_{:06} /1",
-        barcode, which_read, read_dir, position, edit_distance, index
+        "@{}_{}_{}_{}_{}_{:06} /1 {}",
+        barcode, which_read, read_dir, position, edit_distance, index, err_barcode
     );
     let header_r2 = format!(
-        "@{}_{}_{}_{}_{}_{:06} /2",
-        barcode, which_read, read_dir, position, edit_distance, index
+        "@{}_{}_{}_{}_{}_{:06} /2 {}",
+        barcode, which_read, read_dir, position, edit_distance, index, err_barcode
     );
     let qual_r1 = "I".repeat(seq_r1.len());
     let qual_r2 = "I".repeat(seq_r2.len());
