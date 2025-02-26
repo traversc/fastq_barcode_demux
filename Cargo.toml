@@ -1,5 +1,5 @@
 [package]
-name = "fastq_barcode_demuxer"
+name = "fastq_barcode_demux"
 version = "0.1.0"
 edition = "2021"
 

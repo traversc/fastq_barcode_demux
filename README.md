@@ -1,4 +1,7 @@
-# Fastq Barcode Demuxer
+# Fastq Barcode Demux
+
+[![CI](https://github.com/traversc/fastq_barcode_demux/actions/workflows/ci.yml/badge.svg)](https://github.com/traversc/fastq_barcode_demux/actions/workflows/ci.yml)
+
 
 - A flexible tool for demultiplexing FASTQ files containing barcodes
 - Splits FASTQ files into separate output files based on barcode sequence
