@@ -35,6 +35,12 @@ struct Args {
     compress_level: u32,
     #[clap(
         long,
+        default_value = "true",
+        help = "Whether to write unmatched NOMAP reads (true) or not (false) (default: true)"
+    )]
+    output_nomap: String,
+    #[clap(
+        long,
         default_value_t = 0,
         help = "Verbosity level (0 or 1)"
     )]
@@ -57,7 +63,12 @@ const MT_BATCH_SIZE: usize = 17;
 const MT_EPOCH_SIZE: usize = 7;
 
 fn main() -> io::Result<()> {
-    let Args { reads1_path, reads2_path, barcodes_path, output_path, nthreads, compress_algo, compress_level, verbose } = Args::parse();
+    let Args { reads1_path, reads2_path, barcodes_path, output_path, nthreads, compress_algo, compress_level, output_nomap, verbose } = Args::parse();
+    let output_nomap = match output_nomap.as_str() {
+        "true" => true,
+        "false" => false,
+        _ => panic!("output_nomap must be 'true' or 'false'"),
+    };
 
     // compress_level range depends on the compression algorithm
     let compress_suffix = match compress_algo.as_str() {
@@ -100,7 +111,7 @@ fn main() -> io::Result<()> {
     let barcode_matcher = BarcodeMatcher::new(barcode_sequences, max_distance, read1_dir, read1_matchpos, read2_dir, read2_matchpos);
 
     // Pre-create output writers, one writer per barcode.
-    let writer_map = get_writer_map(&barcode_names, &sample_name1, &sample_name2, &output_path, &compress_suffix, compress_level)
+    let writer_map = get_writer_map(&barcode_names, &sample_name1, &sample_name2, &output_path, &compress_algo, compress_level)
         .unwrap_or_else(|e| panic!("Failed to initialize writer map: {}", e));
 
     // Create writers for MULTIMAP and NOMAP.
@@ -120,6 +131,7 @@ fn main() -> io::Result<()> {
             writer_map,
             multimap_writer,
             nomap_writer,
+            output_nomap,
             verbose
         )
         .unwrap_or_else(|e| panic!("Error in single-threaded barcode finder: {}", e));
@@ -136,6 +148,7 @@ fn main() -> io::Result<()> {
                 writer_map,
                 multimap_writer,
                 nomap_writer,
+                output_nomap,
                 verbose
             )
             .unwrap_or_else(|e| panic!("Error in multi-threaded barcode finder: {}", e));
@@ -294,9 +307,10 @@ fn barcode_finder_multi_thread(
     writer_map: Vec<(OutputCompressor, OutputCompressor)>,
     multimap_writer: (OutputCompressor, OutputCompressor),
     nomap_writer: (OutputCompressor, OutputCompressor),
+    output_nomap: bool,
     verbose: usize
 ) -> io::Result<()> {
-    let mut barcode_writer = ConcurrentBarcodeWriter::<{MT_EPOCH_SIZE * MT_BATCH_SIZE}, _>::new(writer_map, nomap_writer, multimap_writer);
+    let mut barcode_writer = ConcurrentBarcodeWriter::<{MT_EPOCH_SIZE * MT_BATCH_SIZE}, _>::new(writer_map, nomap_writer, multimap_writer, output_nomap);
     let mut records_processed = 0;
     'outer: loop {
         let barcode_matcher_ref = &barcode_matcher;
@@ -326,7 +340,9 @@ fn barcode_finder_multi_thread(
                                 barcode_writer_ref.insert_multimap(idx, (record1, record2));
                             }
                             UniqueMatch::None => {
-                                barcode_writer_ref.insert_nomap(idx, (record1, record2));
+                                if output_nomap {
+                                    barcode_writer_ref.insert_nomap(idx, (record1, record2));
+                                }
                             }
                         }
                         idx += 1;
@@ -351,6 +367,7 @@ fn barcode_finder_single_thread(
     mut writer_map: Vec<(OutputCompressor, OutputCompressor)>,
     mut multimap_writer: (OutputCompressor, OutputCompressor),
     mut nomap_writer: (OutputCompressor, OutputCompressor),
+    output_nomap: bool,
     verbose: usize
 ) -> io::Result<()> {
     let mut records_processed = 0;
@@ -383,8 +400,10 @@ fn barcode_finder_single_thread(
                     .unwrap_or_else(|e| panic!("Failed to write record to MULTIMAP writer: {}", e));
             }
             UniqueMatch::None => {
-                write_record(&mut nomap_writer, &record1, &record2)
-                    .unwrap_or_else(|e| panic!("Failed to write record to NOMAP writer: {}", e));
+                if output_nomap {
+                    write_record(&mut nomap_writer, &record1, &record2)
+                        .unwrap_or_else(|e| panic!("Failed to write record to NOMAP writer: {}", e));
+                }
             }
         }        
     }

@@ -1,4 +1,5 @@
 use rayon::prelude::*;
+use rayon::iter::{Either, ParallelIterator};
 use std::cell::UnsafeCell;
 use std::io::{self, Write};
 
@@ -13,6 +14,7 @@ pub struct ConcurrentBarcodeWriter<const MAXP: usize, WriterType> {
     pub barcode_writer: Vec<(WriterType, WriterType)>,
     pub nomap_writer: (WriterType, WriterType),
     pub multimap_writer: (WriterType, WriterType),
+    pub output_nomap: bool,
 }
 
 impl<const MAXP: usize, WriterType> ConcurrentBarcodeWriter<MAXP, WriterType>
@@ -41,6 +43,7 @@ where
         barcode_writer: Vec<(WriterType, WriterType)>,
         nomap_writer: (WriterType, WriterType),
         multimap_writer: (WriterType, WriterType),
+        output_nomap: bool,
     ) -> Self {
         let barcode_queue: Vec<Vec<UnsafeCell<(RECORD, RECORD)>>> = barcode_writer
             .iter()
@@ -72,6 +75,7 @@ where
             barcode_writer,
             nomap_writer,
             multimap_writer,
+            output_nomap,
         }
     }
 
@@ -94,24 +98,43 @@ where
     }
 
     pub fn par_write_data(&mut self) {
+        // RECORD and QueueItem are fine because they don't refer to WriterType
+        type RECORD = (String, String, String, String);
+        type QueueItem = std::cell::UnsafeCell<(RECORD, RECORD)>;
+    
+        // Build the *optional* nomap‐slice iterator
+        let nomap_queue_iter = if self.output_nomap {
+            Either::Left(rayon::iter::once(self.nomap_queue.as_mut_slice()))
+        } else {
+            Either::Right(rayon::iter::empty::<&mut [QueueItem]>())
+        };
+    
         let queue_iter = self
             .barcode_queue
             .par_iter_mut()
             .map(|v| v.as_mut_slice())
-            .chain(rayon::iter::once(self.nomap_queue.as_mut_slice()))
-            .chain(rayon::iter::once(self.multimap_queue.as_mut_slice()));
-
+            .chain(rayon::iter::once(self.multimap_queue.as_mut_slice()))
+            .chain(nomap_queue_iter);
+    
+        // Build the *optional* nomap‐writer iterator, using the generic WriterType directly
+        let nomap_writer_iter = if self.output_nomap {
+            Either::Left(rayon::iter::once(&mut self.nomap_writer))
+        } else {
+            Either::Right(
+                rayon::iter::empty::<&mut (WriterType, WriterType)>(),
+            )
+        };
+    
         let writer_iter = self
             .barcode_writer
             .par_iter_mut()
-            .chain(rayon::iter::once(&mut self.nomap_writer))
-            .chain(rayon::iter::once(&mut self.multimap_writer));
-
+            .chain(rayon::iter::once(&mut self.multimap_writer))
+            .chain(nomap_writer_iter);
+    
         queue_iter.zip(writer_iter).for_each(|(queue, writer)| {
             for cell in queue.iter() {
                 let (r1, r2) = unsafe { &*cell.get() };
                 if !r1.0.is_empty() {
-                    // If the header is not empty, assume a valid record.
                     Self::write_record(writer, r1, r2).unwrap();
                 }
                 unsafe {
@@ -119,8 +142,9 @@ where
                 }
             }
         });
-    }
-
+    }    
+    
+    
     pub fn par_finish(self)
     where
         WriterType: Finish + Send,
